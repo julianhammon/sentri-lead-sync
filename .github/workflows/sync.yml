@@ -1,0 +1,61 @@
+name: Sentri investor lead sync
+
+# Every 5 minutes, on GitHub's runners - not Julian's PC. GitHub often delays
+# scheduled runs by 5-20 minutes under load; that is fine here because the sync
+# re-reads every lead on the form each pass, so a late or skipped run self-heals.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# Only one run at a time. Two concurrent runs would both try to commit the state
+# files and the loser would fail the push.
+concurrency:
+  group: lead-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Standard library only - nothing to install.
+      - name: Pull new leads into Notion
+        env:
+          SENTRI_META_TOKEN: ${{ secrets.SENTRI_META_TOKEN }}
+          SENTRI_PAGE_ID: ${{ secrets.SENTRI_PAGE_ID }}
+          NOTION_INVESTOR2_TOKEN: ${{ secrets.NOTION_INVESTOR2_TOKEN }}
+          NOTION_INVESTOR2_DB: ${{ secrets.NOTION_INVESTOR2_DB }}
+        run: python sync_buyers.py --once
+
+      - name: Send qualified verdicts back to Meta
+        env:
+          SENTRI_META_TOKEN: ${{ secrets.SENTRI_META_TOKEN }}
+          SENTRI_PAGE_ID: ${{ secrets.SENTRI_PAGE_ID }}
+          NOTION_INVESTOR2_TOKEN: ${{ secrets.NOTION_INVESTOR2_TOKEN }}
+          NOTION_INVESTOR2_DB: ${{ secrets.NOTION_INVESTOR2_DB }}
+        run: python qualify_leads.py --once
+
+      # The state files are the ONLY durable record that a lead was already
+      # handled. A Notion query cannot stand in for them: archived rows are not
+      # returned, so a lead Julian deletes would be re-imported on the next pass
+      # and reappear forever. Committing them back is what makes a delete stick.
+      - name: Persist state
+        run: |
+          git config user.name  "sentri-lead-sync"
+          git config user.email "noreply@github.com"
+          git add synced_buyers.json qualified_sent.json
+          if git diff --cached --quiet; then
+            echo "no state change"
+          else
+            git commit -m "state: $(date -u +'%Y-%m-%dT%H:%MZ')"
+            git push
+          fi
