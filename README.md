@@ -1,7 +1,7 @@
 # Sentri investor lead sync
 
 Moves Meta Instant Form leads into the **Investor Lead Database** in Notion, and
-sends the qualified verdict back to Meta. Runs twice an hour on GitHub Actions
+sends the qualified verdict back to Meta. Runs every 5 minutes on GitHub Actions
 so it does not depend on Julian's PC being awake.
 
 ```
@@ -20,18 +20,20 @@ A **Notion** webhook cannot replace the first leg either: Notion webhooks fire
 *outbound* when something changes inside Notion. Nothing in Notion can reach into
 Meta and pull a lead.
 
-## Why minutes 7 and 37, not every 5 minutes
+## This repo is public on purpose
 
-**Cost, and it is a hard ceiling.** This repo is private, so the free plan allows
-2000 Actions minutes/month and GitHub bills a **whole minute per run** however
-short it is - a real run is about 9 seconds. 48 runs/day is ~1440 billed
-min/month, which fits. `*/5` would be ~8600, over 4x the allowance, and when the
-allowance runs out the runs stop silently.
+Public repos get **unlimited** Actions minutes. A private repo on the free plan
+gets 2000/month and is billed a **whole minute per run** however short it is - a
+real run here is about 9 seconds. Every 5 minutes would be ~8600 min/month, over
+4x that, and when the allowance runs out **runs stop silently**.
 
-Making the repo **public** lifts that - public repos get unlimited Actions
-minutes - and nothing here blocks it: the only committed data is opaque Meta lead
-IDs, and secrets stay encrypted regardless. That is the move if sub-5-minute
-freshness is ever wanted.
+It is safe to be public: the only committed data is opaque Meta lead IDs - no
+names, emails or phones - and the four secrets stay encrypted in GitHub Secrets
+regardless of visibility. Verified across the full commit history before
+flipping.
+
+**If this is ever made private again, drop the cadence to `7,37 * * * *` in the
+same commit** (~1440 min/month) or lead sync will die mid-month without warning.
 
 ## A new repo cold-starts its schedule
 

@@ -2,30 +2,32 @@ name: Sentri investor lead sync
 
 # Runs on GitHub's runners, not Julian's PC.
 #
-# Minutes 7 and 37 - twice an hour - NOT "*/5". The reason is cost, and it is a
-# hard ceiling:
+# Every 5 minutes. This repo is PUBLIC, which is what makes that affordable:
+# public repos get UNLIMITED Actions minutes, while a private repo on the free
+# plan gets 2000/month and is billed a WHOLE MINUTE per run however short it is
+# (a real run here takes ~9 seconds). At */5 that would be ~8600 min/month, over
+# 4x the private allowance - and when the allowance runs out, runs stop SILENTLY,
+# which is the worst possible failure mode for lead delivery.
 #
-#   This repo is PRIVATE, so the free plan allows 2000 Actions minutes/month, and
-#   GitHub bills a WHOLE MINUTE per run however short it is. A real run takes
-#   about 9 seconds. So 48 runs/day = ~1440 billed min/month, which fits with
-#   room for manual dispatches. "*/5" would be ~8600 min/month - over 4x the
-#   allowance - and when the allowance runs out the runs just stop. Silently.
+# So: if this repo is ever made private again, drop the cadence to "7,37 * * * *"
+# (~1440 min/month) in the same commit, or lead sync will die without warning
+# partway through a month.
 #
-# Separately, be patient with a NEW repo: the first scheduled run on this one did
-# not fire until ~5 hours after creation, while workflow_dispatch worked
-# instantly the whole time. That is GitHub cold-starting the schedule, not a
-# broken cron. Do not go chasing it. Dispatch manually if a lead is needed now:
+# Nothing sensitive lives here, which is why public is safe: the only committed
+# data is opaque Meta lead IDs (no names, emails or phones), and the four secrets
+# stay encrypted in GitHub Secrets regardless of visibility.
+#
+# Be patient with a NEW repo: the first scheduled run on this one did not fire
+# until ~5 hours after creation, while workflow_dispatch worked instantly the
+# whole time. That is GitHub cold-starting the schedule, not a broken cron. To
+# pull a lead through immediately:
 #   gh workflow run sync.yml --repo julianhammon/sentri-lead-sync
-#
-# If this repo is ever made public, Actions minutes become unlimited and the
-# cadence can go to every 5 minutes for free. Nothing here blocks that: the only
-# data committed is opaque Meta lead IDs, and secrets stay encrypted either way.
 #
 # A dropped or late run costs nothing: the sync re-reads every lead on the form
 # each pass, so it self-heals on the next one.
 on:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 # Only one run at a time. Two concurrent runs would both try to commit the state

@@ -40,7 +40,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -286,10 +286,24 @@ def _fetch_one(form_id):
     return out
 
 
+# Julian reads these timestamps, so they are pinned to HIS clock: MST, UTC-7.
+#
+# Hard-coded on purpose. The previous version called dt.astimezone() with no
+# argument, which means "whatever machine is running this". That was fine while
+# the sync ran on his PC and silently wrong the moment it moved to GitHub
+# Actions, whose runners are UTC - every lead was landing in Notion stamped
+# +00:00 and reading 7 hours into the future.
+#
+# A fixed offset rather than a DST-aware zone: his machine is on Yukon Standard
+# Time, which is UTC-7 all year, so a fixed -7 tracks his own clock in every
+# month. Swap to ZoneInfo("America/Denver") only if he moves somewhere that
+# observes DST.
+MST = timezone(timedelta(hours=-7))
+
+
 def created_local(lead):
-    """Meta returns created_time in UTC ("+0000"). Notion wants ISO 8601 with a
-    real offset, and a bare UTC stamp would read three hours off on screen, so
-    convert to this machine's local zone before writing."""
+    """Meta returns created_time in UTC ("+0000"). Convert the same instant to
+    MST so Notion shows Julian the wall-clock time the lead actually arrived."""
     raw = lead.get("created_time")
     if not raw:
         return None
@@ -297,7 +311,7 @@ def created_local(lead):
         dt = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%S%z")
     except ValueError:
         return None
-    return dt.astimezone().isoformat(timespec="seconds")
+    return dt.astimezone(MST).isoformat(timespec="seconds")
 
 
 def flatten(lead):
