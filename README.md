@@ -61,14 +61,45 @@ same person converted twice and corrupts optimisation.
 
 ## What qualifies
 
-All four must hold, per Julian:
+Both must hold, per Julian 2026-11-05:
 
 | Field | Must be |
 |---|---|
-| Status | `Answered` |
-| Rentals | anything except `No` |
-| Flipped Before | anything except `No - would be my first` |
-| Close Speed | `Under 14 days` |
+| Rentals | anything except `No` (owns >=1 rental) |
+| Flipped Before | anything except `No - would be my first` (>=1 flip) |
+
+This replaced a four-condition rule that also required `Status == Answered` and
+`Close Speed == Under 14 days`. **Dropping `Status` is the point.** Status is set
+by a human after calling the lead, so the old rule gated the entire signal behind
+manual follow-up - which is why only 2 events fired in two months. Rentals and
+Flipped Before are answered on the form, so the verdict is known the moment a
+lead lands and fires with nobody in the loop.
+
+Measured over 81 Meta leads: old rule **3.7%**, this rule **24.7%**. Same funnel,
+~7x the signal.
+
+Events older than 7 days are recorded as handled and never sent - Meta will not
+attribute them, and an unsendable event would otherwise be retried every 5
+minutes forever.
+
+## Optimising on it is BLOCKED (as of 2026-11-05)
+
+No live ad set consumes these events yet. `optimization_goal: QUALITY_LEAD` is
+refused at every turn, established by validate-only probes:
+
+| Attempt | Error |
+|---|---|
+| existing campaign | `1885760` - campaign is locked to its first ad set's goal; needs a NEW campaign |
+| new campaign, `page_id` only | `1815169` Invalid performance goal |
+| new campaign, `pixel + page` | `2490291` **Not a Valid CRM Data Source** |
+
+That last error is the real blocker: Conversion Leads needs the dataset
+registered as a CRM data source for the Page, and there is **no Graph API path**
+for it - every candidate endpoint returns `Unknown path components`. It is an
+Events Manager UI setup.
+
+Until that is done the live ad set stays on `LEAD_GENERATION` (any form fill) and
+this script builds history rather than steering spend.
 
 ## Secrets
 

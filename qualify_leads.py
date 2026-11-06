@@ -1,30 +1,48 @@
 #!/usr/bin/env python3
-"""Send the qualified verdict back to Meta so QUALITY_LEAD optimisation can learn.
+"""Send the qualified verdict back to Meta so it can optimise on lead QUALITY.
 
     python qualify_leads.py --dry-run   # who qualifies, nothing sent
     python qualify_leads.py --once      # send any new qualified leads
 
-WHY THIS EXISTS
-The ad set optimises for `QUALITY_LEAD` (Conversion Leads). Meta cannot know which
-form fills were any good unless the verdict is sent back, so without this the
-setting does nothing - it just spends against a signal that never arrives.
-
-QUALIFIED, per Julian 2026-09-09 - ALL FOUR must hold:
-    Status         == Answered
+QUALIFIED, per Julian 2026-11-05 - BOTH must hold:
     Rentals        != No            (owns at least one rental)
     Flipped Before != No ...first   (has done at least one flip)
-    Close Speed    == Under 14 days
 
-Events go to the pixel dataset keyed on `lead_id`, which is how Meta ties a
-conversion back to the specific Instant Form submission and therefore to the ad
-that produced it. `action_source` must be `system_generated` for lead events.
+This replaced a four-condition rule that also required `Status == Answered` and
+`Close Speed == Under 14 days`. Dropping `Status` is the important part: Status
+is set by a HUMAN after calling the lead, so the old rule gated the whole signal
+behind manual follow-up. That is why only 2 events ever fired in two months.
+Rentals and Flipped Before are answered on the form itself, so the verdict is
+known the instant a lead arrives and fires with no human in the loop.
+
+Measured on 81 Meta leads: the old rule qualified 3.7%. This one qualifies
+24.7%. Same funnel, ~7x the signal, because nothing waits on a phone call.
+
+WHERE THIS DOES AND DOES NOT WORK YET
+Events land in the pixel dataset keyed on `lead_id`, which is how Meta ties a
+conversion back to a specific Instant Form submission and so to the ad that
+produced it. `action_source` must be `system_generated` for lead events.
+
+But NO live ad set consumes them yet. Setting an ad set to
+`optimization_goal: QUALITY_LEAD` is refused:
+  - on an existing campaign: error 1885760, the campaign is locked to the goal
+    its first ad set used, so it needs a NEW campaign;
+  - on a new campaign with page_id alone: error 1815169 "Invalid performance
+    goal";
+  - on a new campaign with pixel + page: error 2490291 "Not a Valid CRM Data
+    Source".
+That last one is the real blocker. Conversion Leads needs the dataset registered
+as a CRM data source for the Page, and there is NO Graph API path for it - every
+candidate endpoint returns "Unknown path components". It is an Events Manager UI
+setup. Until that is done this script is building history, not steering spend.
 
 State lives in qualified_sent.json so a lead is never counted twice - a repeated
-event would tell Meta the same person converted again.
+event would tell Meta the same person converted again and corrupt optimisation.
 """
 import argparse
 import json
 import time
+from datetime import datetime, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,10 +72,34 @@ def val(props, key):
 
 
 def qualifies(p):
-    return (val(p, "Status") == "Answered"
-            and val(p, "Rentals") not in NOT_RENTALS
-            and val(p, "Flipped Before") not in NOT_FLIPPED
-            and val(p, "Close Speed") == "Under 14 days")
+    """At least one rental AND at least one flip. Both come straight off the
+    form, so this needs no human step - see the module docstring."""
+    return (val(p, "Rentals") not in NOT_RENTALS
+            and val(p, "Flipped Before") not in NOT_FLIPPED)
+
+
+# Meta rejects conversion events older than 7 days, and an unattributable event
+# is worse than none: it cannot help optimisation but it can still be retried
+# forever. Anything older is recorded as handled and never sent.
+STALE_AFTER_DAYS = 7
+
+
+def created_of(props):
+    v = props.get("Created", {})
+    d = v.get("date") or {}
+    return d.get("start")
+
+
+def is_stale(created):
+    if not created:
+        return False
+    try:
+        dt = datetime.fromisoformat(created)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).days > STALE_AFTER_DAYS
 
 
 def send(lead_id):
@@ -86,8 +128,19 @@ def main():
     a = ap.parse_args()
 
     ds = sb.data_source_id()
-    rows = sb.notion(f"data_sources/{ds}/query", {"page_size": 100},
-                     method="POST").get("results", [])
+    # Paginated. The previous version asked for one page of 100 and used it as
+    # if it were the whole table, so the moment the DB passed 100 rows it would
+    # have silently stopped qualifying anyone past that point.
+    rows, cursor = [], None
+    while True:
+        q = {"page_size": 100}
+        if cursor:
+            q["start_cursor"] = cursor
+        page = sb.notion(f"data_sources/{ds}/query", q, method="POST")
+        rows += page.get("results", [])
+        cursor = page.get("next_cursor")
+        if not cursor:
+            break
     sent = set(json.loads(SENT.read_text(encoding="utf-8"))) if SENT.exists() else set()
 
     hits = []
@@ -96,15 +149,22 @@ def main():
         if not qualifies(p):
             continue
         lead_id = val(p, "Meta Lead ID")
-        hits.append((val(p, "Investor"), lead_id))
+        hits.append((val(p, "Investor"), lead_id, created_of(p)))
 
     print(f"qualified in Notion: {len(hits)}   already sent: {len(sent)}")
-    for name, lead_id in hits:
+    for name, lead_id, created in hits:
         if not lead_id:
             print(f"  {name}: no Meta Lead ID - skipped")
             continue
         if lead_id in sent:
             print(f"  {name}: already sent")
+            continue
+        if is_stale(created):
+            # Record as handled so it stops being retried every 5 minutes.
+            print(f"  {name}: older than {STALE_AFTER_DAYS}d ({created[:10]}) - "
+                  f"too late to attribute, marking handled")
+            if not a.dry_run:
+                sent.add(lead_id)
             continue
         if a.dry_run:
             print(f"  WOULD SEND  {name}  lead_id={lead_id}")
