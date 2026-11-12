@@ -149,33 +149,34 @@ def main():
         if not qualifies(p):
             continue
         lead_id = val(p, "Meta Lead ID")
-        hits.append((val(p, "Investor"), lead_id, created_of(p)))
+        hits.append((lead_id, created_of(p)))
 
     print(f"qualified in Notion: {len(hits)}   already sent: {len(sent)}")
-    for name, lead_id, created in hits:
+    # NEVER print investor names here. This repo is PUBLIC and Actions logs on a
+    # public repo are readable by any signed-in GitHub user. Lead ids are enough.
+    for lead_id, created in hits:
         if not lead_id:
-            print(f"  {name}: no Meta Lead ID - skipped")
+            print("  (row with no Meta Lead ID) - skipped")
             continue
         if lead_id in sent:
-            print(f"  {name}: already sent")
-            continue
+            continue                      # silent: this is the common case
         if is_stale(created):
-            # Record as handled so it stops being retried every 5 minutes.
-            print(f"  {name}: older than {STALE_AFTER_DAYS}d ({created[:10]}) - "
-                  f"too late to attribute, marking handled")
+            # Record as handled so it stops being retried on every pass.
+            print(f"  lead {lead_id}: older than {STALE_AFTER_DAYS}d "
+                  f"({created[:10]}) - too late to attribute, marking handled")
             if not a.dry_run:
                 sent.add(lead_id)
             continue
         if a.dry_run:
-            print(f"  WOULD SEND  {name}  lead_id={lead_id}")
+            print(f"  WOULD SEND  lead {lead_id}")
             continue
         res = send(lead_id)
         if res.get("error"):
             e = res["error"]
-            print(f"  {name}: FAILED - {e.get('message')} | {e.get('error_user_msg','')}")
+            print(f"  lead {lead_id}: FAILED - {e.get('message')}")
             continue
         sent.add(lead_id)
-        print(f"  {name}: sent  (received={res.get('events_received')})")
+        print(f"  lead {lead_id}: sent  (received={res.get('events_received')})")
 
     if not a.dry_run:
         SENT.write_text(json.dumps(sorted(sent), indent=1), encoding="utf-8")

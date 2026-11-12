@@ -452,11 +452,12 @@ def run(dry=False, status_only=False):
     written = 0
     for lead in pending:
         f = flatten(lead)
-        who = f.get("full_name") or "Unknown"
         extra = "  ".join(f"{k}={f.get(k, '-')}" for k in EXTRA)
+        # NEVER print names, emails or phones. This repo is PUBLIC and Actions
+        # logs on a public repo are readable by any signed-in GitHub user. The
+        # lead id is enough to find the person in Notion or Meta.
         if dry:
-            print(f"  WOULD WRITE  {who} | {f.get('city') or f.get('markets','')} | "
-                  f"{f.get('email','')} | {f.get('phone_number','')} | {extra}")
+            print(f"  WOULD WRITE  lead {lead['id']} | {extra}")
             continue
         if already_in_notion(ds_id, lead["id"]):
             seen.add(lead["id"])
@@ -464,7 +465,7 @@ def run(dry=False, status_only=False):
         write_lead(ds_id, title_prop, lead, f, props)
         seen.add(lead["id"])
         written += 1
-        print(f"  wrote  {who}")
+        print(f"  wrote  lead {lead['id']}")
 
     if not dry:
         save_state(seen)

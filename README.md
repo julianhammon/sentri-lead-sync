@@ -35,16 +35,40 @@ flipping.
 **If this is ever made private again, drop the cadence to `7,37 * * * *` in the
 same commit** (~1440 min/month) or lead sync will die mid-month without warning.
 
-## A new repo cold-starts its schedule
+## Latency: ~60 seconds, and NOT from the cron
 
-The first scheduled run on this repo did not fire until **~5 hours after it was
-created**, while `workflow_dispatch` worked instantly throughout. Three leads sat
-unsynced in the meantime. This is GitHub cold-starting a new schedule, not a
-broken cron - don't go debugging it. If a lead is needed immediately:
+The `*/5` schedule does not work on this repo and never did. Over
+2026-11-04..10 GitHub started **24 scheduled runs out of ~1,750 due** - 3 to 5 a
+day, 3 to 11 hours apart, no improvement over time. Every run that started
+succeeded in ~9 seconds, so nothing ever looked broken; leads just reached Notion
+a typical **3 hours late** (worst 8). On 2026-11-11 two leads sat in Meta for 4
+hours while Notion looked empty, which is what surfaced it.
 
-```bash
-gh workflow run sync.yml --repo julianhammon/sentri-lead-sync
-```
+`workflow_dispatch` starts instantly and always has. So the sync **stopped
+relying on the scheduler**: one job now stays up for ~5h45m and polls every 60
+seconds itself.
+
+The chain restarts via the `concurrency` group, not a self-dispatch. While the
+long job runs, a cron-triggered run goes **pending** rather than being dropped,
+and GitHub keeps one pending run per group - so it takes over the moment the
+current shift ends. `GITHUB_TOKEN` cannot re-dispatch this workflow from inside
+itself (GitHub blocks token-triggered events to prevent recursion), which is why
+no PAT is needed.
+
+**This is only free because the repo is public.** One run is ~345 billed
+minutes; on a private repo's 2000/month that is a sixth of the allowance per
+run, and the chain is continuous. If this ever goes private, revert to a short
+job on `7,37 * * * *` in the same commit.
+
+## Logs must never contain names
+
+Actions logs on a public repo are readable by **any signed-in GitHub user**, and
+the poller now writes ~345 passes per run instead of one. Both scripts therefore
+print **lead ids only** - never names, emails or phones. A lead id is enough to
+find the person in Notion or Meta.
+
+Run logs from before 2026-11-11 do contain names (56 across 28 runs, no emails
+or phones) and have not been deleted.
 
 ## State files are load-bearing
 
