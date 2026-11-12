@@ -56,7 +56,15 @@ jobs:
     # final state and exit cleanly rather than being killed mid-write.
     timeout-minutes: 355
     steps:
+      # fetch-depth 0, NOT the default 1. The poll loop below runs
+      # `git pull --rebase` before pushing state, and a rebase on a shallow
+      # clone can fail. That failure would be near-silent: the retry loop gives
+      # up after 3 tries and the poller carries on, so state would stop
+      # persisting and every lead Julian deletes would be re-imported on the
+      # next shift. Full history here is a few hundred KB.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
